@@ -10,6 +10,10 @@ import UIKit
 
 class PhotosCollectionViewController: UIViewController, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
     
+    let cache = Cache<Int, Data>()
+    let photoFetchQueue = OperationQueue()
+    var fetchOperations = [Int : BlockOperation]()
+    
     override func viewDidLoad() {
         super.viewDidLoad()
         
@@ -60,13 +64,37 @@ class PhotosCollectionViewController: UIViewController, UICollectionViewDataSour
         return UIEdgeInsets(top: 0, left: 10.0, bottom: 0, right: 10.0)
     }
     
+    func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        fetchOperations[indexPath.row]?.cancel()
+    }
     // MARK: - Private
     
     private func loadImage(forCell cell: ImageCollectionViewCell, forItemAt indexPath: IndexPath) {
+        let photoReference = photoReferences[indexPath.item]
+        if cache.value(for: photoReference.id) != nil {
+            cell.imageView.image = UIImage(data: cache.value(for: photoReference.id)!)
+            return
+        }
+        let operation = FetchPhotoOperation(reference: photoReference)
         
-        // let photoReference = photoReferences[indexPath.item]
+        let operation2 = BlockOperation {
+            guard let data = operation.imageData else { return }
+            self.cache.cache(value: data, for: photoReference.id)
+        }
         
-        // TODO: Implement image loading here
+        let operation3 = BlockOperation {
+            DispatchQueue.main.async {
+            if self.collectionView.indexPath(for: cell) == indexPath {
+                guard let data = operation.imageData else { return }
+                cell.imageView.image = UIImage(data: data)
+                }
+            }
+        }
+        
+        operation2.addDependency(operation)
+        operation3.addDependency(operation2)
+        photoFetchQueue.addOperations([operation, operation2, operation3], waitUntilFinished: false)
+        fetchOperations.updateValue(operation3, forKey: photoReference.id)
     }
     
     // Properties
